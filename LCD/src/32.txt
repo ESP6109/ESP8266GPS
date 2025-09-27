@@ -1,0 +1,242 @@
+#include <TinyGPSPlus.h>
+#include <Wire.h>
+#include <Adafruit_GFX.h>
+#include <Adafruit_SSD1306.h>
+#include <SoftwareSerial.h>
+#include "ESP8266WiFi.h"
+
+// I2C款接线说明
+// NodeMCU开发板	 0.96寸OLED 引脚连接对应关系
+// GND	          GND
+// 3V3	          VCC
+// SCL	          D1 （GPIO 5）
+// SDA	          D2 （GPIO 4）
+#define SCREEN_WIDTH 128                                                   // OLED display width, in pixels
+#define SCREEN_HEIGHT 64                                                   // OLED display height, in pixels
+#define OLED_RESET 13                                                      // 重置引脚
+#define SCREEN_ADDRESS 0x3C                                                // OLED 显示屏的地址，固化在芯片上
+Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, OLED_RESET);  // 创建实例
+
+// gps模块引脚定义
+#define RXPin 12  // GPIO 12 对应nodemcu D6
+#define TXPin 14  // GPIO 14 对应nodemcu D5
+
+// The serial connection to the GPS device
+SoftwareSerial ss(RXPin, TXPin);
+
+// The TinyGPSPlus object
+TinyGPSPlus gps;
+
+// 一些需要使用的变量
+int Year, Month, Date, Hour, Minute, Second, Yea, Mon, Dat, Hou;
+double Lat, Lng;
+String sMonth, sDate, sHour, sMinute, sSecond;
+
+
+void setup() {
+  Serial.begin(9600);
+
+  WiFi.mode(WIFI_OFF);  //关闭WIFI模块省电
+  WiFi.forceSleepBegin();
+
+  ss.begin(9600);  //GPS模块虚拟串口
+
+  // SSD1306_SWITCHCAPVCC = generate display voltage from 3.3V internally
+  if (!display.begin(SSD1306_SWITCHCAPVCC, SCREEN_ADDRESS)) {
+    Serial.println(F("SSD1306 allocation failed"));
+    for (;;)
+      ;  // Don't proceed, loop forever
+  }
+
+  display.clearDisplay();       // 清屏
+  display.setTextColor(WHITE);  // 设置字体颜色为白色
+  display.display();            // 显示
+  //OLED屏初始化代码
+}
+
+
+
+
+
+void loop() {
+
+  boolean newData = false;
+  for (unsigned long start = millis(); millis() - start < 300;) {
+    while (ss.available()) {
+      if (gps.encode(ss.read())) {
+        newData = true;
+      }
+    }
+  }  //上面是GPS数据接收的固定代码，不能删除
+
+
+  Yea = gps.date.year();       //年
+  Mon = gps.date.month();      //月
+  Dat = gps.date.day();        //日
+  Hou = gps.time.hour();       //时
+  Minute = gps.time.minute();  //分
+  Second = gps.time.second();  //秒
+  Lng = gps.location.lng();    //经度
+  Lat = gps.location.lat();    //纬度
+
+
+  // 创建一个字符串来存储所有变量
+  // String origin = String(Yea) + "-" + String(Mon) + "-" + String(Dat) + " " + String(Hou) + ":" + String(Minute) + ":" + String(Second)  + " (" + String(Lng, 8) + "," + String(Lat, 8) + ")";
+
+  // 输出整个字符串
+  // Serial.println(origin);
+
+
+  //年月日时转换部分，将UTC时间转换为北京时间，并消除错误
+  Hour = Hou + 8;  //修正时区
+
+  if (Hour >= 24) {
+    Hour = Hour - 24;  //修正小时超程
+  }
+
+  if (Hou + 8 >= 24) {
+    Date = Dat + 1;
+    if ((Mon == 1 || Mon == 3 || Mon == 5 || Mon == 7 || Mon == 8 || Mon == 10 || Mon == 12) && (Date > 31)) {
+      Date = Date - 30;
+      Month = Mon + 1;  //大月进位
+    } else {
+      Month = Mon;
+      Year = Yea;
+    }
+    if ((Mon == 4 || Mon == 6 || Mon == 9 || Mon == 11) && (Date > 30)) {
+      Date = Date - 29;
+      Month = Mon + 1;  //小月进位
+    } else {
+      Month = Mon;
+      Year = Yea;
+    }
+    if ((Yea % 4 == 0) && (Date > 29)) {
+      Date = Date - 28;
+      Month = Mon + 1;  //闰月判定并进位
+    } else {
+      Month = Mon;
+      Year = Yea;
+    }
+    if ((Yea % 4 != 0) && (Date > 28)) {
+      Date = Date - 27;
+      Month = Mon + 1;  //非闰月判定并进位
+    } else {
+      Month = Mon;
+      Year = Yea;
+    }
+    if (Month > 12) {
+      Month = Month - 12;
+      Year = Yea + 1;  //年超程进位
+    }
+  } else {
+    Date = Dat;
+    Month = Mon;
+    Year = Yea;
+  }
+
+  //结果显示部分
+  display.setTextColor(SSD1306_WHITE);
+  display.setCursor(38, 0);
+  display.setTextSize(1);
+  display.print(Year);
+
+  display.setCursor(63, 0);
+  display.setTextSize(1);
+  display.print("-");
+  display.setTextSize(1);
+  display.setCursor(71, 0);
+  sMonth = formatNumber(Month, 2);
+  display.print(sMonth);
+
+
+  display.setCursor(83, 0);
+  display.setTextSize(1);
+  display.print("-");
+  display.setTextSize(1);
+  display.setCursor(91, 0);
+  sDate = formatNumber(Date, 2);
+  display.print(sDate);
+
+
+  display.setTextSize(2);
+  display.setCursor(26, 13);
+  sHour = formatNumber(Hour, 2);
+  display.print(sHour);
+
+
+  display.setCursor(46, 13);
+  display.setTextSize(2);
+  display.print(":");
+
+  display.setTextSize(2);
+  display.setCursor(56, 13);
+  sMinute = formatNumber(Minute, 2);
+  display.print(sMinute);
+
+
+  display.setCursor(76, 13);
+  display.setTextSize(2);
+  display.print(":");
+
+  display.setTextSize(2);
+  display.setCursor(86, 13);
+  sSecond = formatNumber(Second, 2);
+  display.print(sSecond);
+
+
+  display.setTextSize(1);
+  display.setCursor(35, 33);
+  display.print(gps.location.lng(), 8);
+
+
+  display.setTextSize(1);
+  display.setCursor(35, 43);
+  display.print(gps.location.lat(), 8);
+
+
+  // 创建一个字符串来存储所有变量
+  // String message = String(Year) + "-" + String(sMonth) + "-" + String(sDate) + " "+ String(sHour) + ":" + String(sMinute) + ":" + String(sSecond) + " (" + String(Lng, 8) + "," + String(Lat, 8) + ")";
+
+  // 输出整个字符串
+  // Serial.println(message);
+
+
+
+  display.setCursor(105, 53);
+  display.setTextSize(1);
+  display.print("m");
+
+  display.setCursor(50, 53);
+  display.setTextSize(1);
+  display.print("km/h");
+
+
+  display.setTextSize(1);
+  display.setCursor(80, 53);
+  display.print(gps.speed.mps());
+
+
+  display.setTextSize(1);
+  display.setCursor(25, 53);
+  display.print(gps.speed.kmph());
+
+
+  display.display();
+  delay(500);
+  display.clearDisplay();
+}
+
+
+// 格式化数字的函数
+String formatNumber(int number, int digits) {
+  String formatted = "";
+  if (number < pow(10, digits - 1)) {
+    formatted = String(number, DEC);
+    while (formatted.length() < digits) {
+      formatted = "0" + formatted;
+    }
+  } else {
+    formatted = String(number, DEC);
+  }
+  return formatted;
+}
